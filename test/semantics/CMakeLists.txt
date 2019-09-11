@@ -149,6 +149,13 @@ set(ERROR_TESTS
   dosemantics10.f90
   expr-errors01.f90
   null01.f90
+  omp-resolve01.f90
+  omp-resolve02.f90
+  omp-symbol01.f90
+  omp-symbol02.f90
+  omp-symbol03.f90
+  omp-symbol04.f90
+  omp-symbol05.f90
   omp-clause-validity01.f90
   omp-loop-association.f90
 #  omp-nested01.f90
