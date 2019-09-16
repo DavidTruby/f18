@@ -151,6 +151,7 @@ set(ERROR_TESTS
   null01.f90
   omp-resolve01.f90
   omp-resolve02.f90
+  omp-resolve03.f90
   omp-symbol01.f90
   omp-symbol02.f90
   omp-symbol03.f90
@@ -286,7 +287,7 @@ foreach(test ${MODFILE_TESTS})
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_modfile.sh ${test} ${F18})
 endforeach()
 
-foreach(test ${LABEL_TESTS} ${CANONDO_TESTS} ${DOCONCURRENT_TESTS} 
+foreach(test ${LABEL_TESTS} ${CANONDO_TESTS} ${DOCONCURRENT_TESTS}
              ${FORALL_TESTS} ${GETSYMBOLS_TESTS} ${GETDEFINITION_TESTS})
   add_test(NAME ${test}
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_any.sh ${test} ${F18})
