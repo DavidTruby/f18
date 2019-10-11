@@ -21,6 +21,7 @@
 #include "../common/indirection.h"
 #include "../parser/message.h"
 #include "../parser/parse-tree.h"
+#include "../parser/tools.h"
 #include <algorithm>
 #include <set>
 #include <variant>
@@ -506,6 +507,139 @@ std::optional<parser::MessageFixedText> WhyNotModifiable(
   } else {
     return std::nullopt;
   }
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::SyncAllStmt &) {
+  return "SYNC ALL is not allowed in this context"_err_en_US;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::SyncImagesStmt &) {
+  return "SYNC IMAGES is not allowed in this context"_err_en_US;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::SyncMemoryStmt &) {
+  return "SYNC MEMORY is not allowed in this context"_err_en_US;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::SyncTeamStmt &) {
+  return "SYNC TEAM is not allowed in this context"_err_en_US;
+}
+
+bool IsCoarray(const parser::AllocateObject &allocateObject) {
+  const parser::Name &name{GetLastName(allocateObject)};
+  if (name.symbol && IsCoarray(*name.symbol)) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::AllocateStmt &allocateStmt) {
+  const auto &allocationList{
+      std::get<std::list<parser::Allocation>>(allocateStmt.t)};
+  for (const auto &allocation : allocationList) {
+    const auto &allocateObject{std::get<parser::AllocateObject>(allocation.t)};
+    if (IsCoarray(allocateObject)) {
+      return "ALLOCATE of a coarray is not allowed in this context"_err_en_US;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::DeallocateStmt &deallocateStmt) {
+  const auto &allocateObjectList{
+      std::get<std::list<parser::AllocateObject>>(deallocateStmt.t)};
+  for (const auto &allocateObject : allocateObjectList) {
+    if (IsCoarray(allocateObject)) {
+      return "DEALLOCATE of a coarray is not allowed in this "
+             "context"_err_en_US;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::ChangeTeamStmt &) {
+  return "CHANGE TEAM is not allowed in this context"_err_en_US;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::CriticalStmt &) {
+  return "CRITICAL is not allowed in this context"_err_en_US;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::EventPostStmt &) {
+  return "EVENT POST is not allowed in this context"_err_en_US;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::EventWaitStmt &) {
+  return "EVENT WAIT is not allowed in this context"_err_en_US;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::FormTeamStmt &) {
+  return "FORM TEAM is not allowed in this context"_err_en_US;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::LockStmt &) {
+  return "LOCK is not allowed in this context"_err_en_US;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::UnlockStmt &) {
+  return "UNLOCK is not allowed in this context"_err_en_US;
+}
+
+bool HasCoarray(const parser::Expr &expression) {
+  if (const auto *expr{GetExpr(expression)}) {
+    for (const Symbol *symbol : evaluate::CollectSymbols(*expr)) {
+      if (const Symbol * root{GetAssociationRoot(DEREF(symbol))}) {
+        if (IsCoarray(*root)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// C1137: Do we have a call to move_alloc() with a coarray argument?
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::Call &call) {
+  const auto &procedureDesignator{
+      std::get<parser::ProcedureDesignator>(call.t)};
+  if (auto *name{std::get_if<parser::Name>(&procedureDesignator.u)}) {
+    // TODO: also ensure that the procedure is, in fact, an intrinsic
+    if (name->source == "move_alloc") {
+      const auto &args{std::get<std::list<parser::ActualArgSpec>>(call.t)};
+      if (!args.empty()) {
+        const parser::ActualArg &actualArg{
+            std::get<parser::ActualArg>(args.front().t)};
+        if (const auto *argExpr{
+                std::get_if<common::Indirection<parser::Expr>>(&actualArg.u)}) {
+          if (HasCoarray(argExpr->value())) {
+            return "Call to MOVE_ALLOC intrinsic with a coarray argument"
+                   " is not allowed in this context"_err_en_US;
+          }
+        }
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::StopStmt &) {
+  return "STOP is not allowed in this context"_err_en_US;
 }
 
 static const DeclTypeSpec &InstantiateIntrinsicType(Scope &scope,

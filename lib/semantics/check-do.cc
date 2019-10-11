@@ -43,11 +43,6 @@ static const parser::Name *MaybeGetConstructName(
           .statement.v);
 }
 
-// Return the (possibly null) name of the statement
-template<typename A> static const parser::Name *MaybeGetStmtName(const A &a) {
-  return common::GetPtrFromOptional(std::get<0>(a.t));
-}
-
 // 11.1.7.5 - enforce semantics constraints on a DO CONCURRENT loop body
 class DoConcurrentBodyEnforce {
 public:
@@ -55,7 +50,16 @@ public:
   std::set<parser::Label> labels() { return labels_; }
   std::set<SourceName> names() { return names_; }
   template<typename T> bool Pre(const T &) { return true; }
-  template<typename T> void Post(const T &) {}
+  template<typename T> void Post(const T &node) {
+    if (const std::optional<parser::MessageFixedText> message{
+            GetImageControlStmtMsg(node)}) {  // C1137
+      context_.Say(currentStatementSourcePosition_, *message)
+          .Attach(context_.location().value(),
+              "An image control statement is not allowed in DO"
+              " CONCURRENT"_en_US);
+    }
+  }
+
   template<typename T> bool Pre(const parser::Statement<T> &statement) {
     currentStatementSourcePosition_ = statement.source;
     if (statement.label.has_value()) {
@@ -117,80 +121,32 @@ public:
 
   // C1136
   void Post(const parser::ReturnStmt &) {
-    context_.Say(currentStatementSourcePosition_,
-        "RETURN not allowed in DO CONCURRENT"_err_en_US);
-  }
-
-  // C1137
-  void NoImageControl() {
-    context_.Say(currentStatementSourcePosition_,
-        "image control statement not allowed in DO CONCURRENT"_err_en_US);
-  }
-
-  // more C1137 checks
-  void Post(const parser::SyncAllStmt &) { NoImageControl(); }
-  void Post(const parser::SyncImagesStmt &) { NoImageControl(); }
-  void Post(const parser::SyncMemoryStmt &) { NoImageControl(); }
-  void Post(const parser::SyncTeamStmt &) { NoImageControl(); }
-  void Post(const parser::ChangeTeamConstruct &) { NoImageControl(); }
-  void Post(const parser::CriticalConstruct &) { NoImageControl(); }
-  void Post(const parser::EventPostStmt &) { NoImageControl(); }
-  void Post(const parser::EventWaitStmt &) { NoImageControl(); }
-  void Post(const parser::FormTeamStmt &) { NoImageControl(); }
-  void Post(const parser::LockStmt &) { NoImageControl(); }
-  void Post(const parser::UnlockStmt &) { NoImageControl(); }
-  void Post(const parser::StopStmt &) { NoImageControl(); }
-
-  // more C1137 checks
-  void Post(const parser::AllocateStmt &allocateStmt) {
-    CheckDoesntContainCoarray(allocateStmt);
-  }
-
-  void Post(const parser::DeallocateStmt &deallocateStmt) {
-    CheckDoesntContainCoarray(deallocateStmt);  // C1137
-
-    // C1140: deallocation of polymorphic objects
-    if (anyObjectIsPolymorphic()) {
-      context_.Say(currentStatementSourcePosition_,
-          "DEALLOCATE polymorphic object(s) not allowed"
-          " in DO CONCURRENT"_err_en_US);
-    }
-  }
-
-  template<typename T> void Post(const parser::Statement<T> &) {
-    if (EndTDeallocatesCoarray()) {
-      context_.Say(currentStatementSourcePosition_,
-          "implicit deallocation of coarray not allowed"
-          " in DO CONCURRENT"_err_en_US);
-    }
+    context_
+        .Say(currentStatementSourcePosition_,
+            "RETURN is not allowed in DO CONCURRENT"_err_en_US)
+        .Attach(context_.location().value(), "Enclosing statement"_en_US);
   }
 
   // C1141: cannot call ieee_get_flag, ieee_[gs]et_halting_mode
+  // It's not necessary to check the ieee_get* procedures because they're
+  // not pure, and impure procedures are caught by checks for constraint C1139
   void Post(const parser::ProcedureDesignator &procedureDesignator) {
     if (auto *name{std::get_if<parser::Name>(&procedureDesignator.u)}) {
-      // C1137: call move_alloc with coarray arguments
-      if (name->source == "move_alloc") {
-        if (anyObjectIsCoarray()) {
-          context_.Say(currentStatementSourcePosition_,
-              "call to MOVE_ALLOC intrinsic in DO CONCURRENT with coarray"
-              " argument(s) not allowed"_err_en_US);
-        }
-      }
       // C1139: call to impure procedure
       if (name->symbol && !IsPureProcedure(*name->symbol)) {
-        context_.Say(currentStatementSourcePosition_,
-            "call to impure procedure in DO CONCURRENT not allowed"_err_en_US);
+        context_
+            .Say(currentStatementSourcePosition_,
+                "Call to an impure procedure is not allowed in DO"
+                " CONCURRENT"_err_en_US)
+            .Attach(context_.location().value(), "Enclosing statement"_en_US);
       }
       if (name->symbol && fromScope(*name->symbol, "ieee_exceptions"s)) {
-        if (name->source == "ieee_get_flag") {
-          context_.Say(currentStatementSourcePosition_,
-              "IEEE_GET_FLAG not allowed in DO CONCURRENT"_err_en_US);
-        } else if (name->source == "ieee_set_halting_mode") {
-          context_.Say(currentStatementSourcePosition_,
-              "IEEE_SET_HALTING_MODE not allowed in DO CONCURRENT"_err_en_US);
-        } else if (name->source == "ieee_get_halting_mode") {
-          context_.Say(currentStatementSourcePosition_,
-              "IEEE_GET_HALTING_MODE not allowed in DO CONCURRENT"_err_en_US);
+        if (name->source == "ieee_set_halting_mode") {
+          context_
+              .Say(currentStatementSourcePosition_,
+                  "IEEE_SET_HALTING_MODE is not allowed in DO "
+                  "CONCURRENT"_err_en_US)
+              .Attach(context_.location().value(), "Enclosing statement"_en_US);
         }
       }
     } else {
@@ -198,8 +154,11 @@ public:
       auto &component{std::get<parser::ProcComponentRef>(procedureDesignator.u)
                           .v.thing.component};
       if (component.symbol && !IsPureProcedure(*component.symbol)) {
-        context_.Say(currentStatementSourcePosition_,
-            "call to impure procedure in DO CONCURRENT not allowed"_err_en_US);
+        context_
+            .Say(currentStatementSourcePosition_,
+                "Call to an impure procedure component is not allowed"
+                " in DO CONCURRENT"_err_en_US)
+            .Attach(context_.location().value(), "Enclosing statement"_en_US);
       }
     }
   }
@@ -210,45 +169,21 @@ public:
             std::get_if<parser::IoControlSpec::CharExpr>(&ioControlSpec.u)}) {
       if (std::get<parser::IoControlSpec::CharExpr::Kind>(charExpr->t) ==
           parser::IoControlSpec::CharExpr::Kind::Advance) {
-        context_.Say(currentStatementSourcePosition_,
-            "ADVANCE specifier not allowed in DO CONCURRENT"_err_en_US);
+        context_
+            .Say(currentStatementSourcePosition_,
+                "ADVANCE specifier is not allowed in DO CONCURRENT"_err_en_US)
+            .Attach(context_.location().value(), "Enclosing statement"_en_US);
       }
     }
   }
 
 private:
-  // C1137 helper functions
-  void CheckAllocateObjectIsntCoarray(
-      const parser::AllocateObject &allocateObject, StmtType stmtType) {
-    const parser::Name &name{GetLastName(allocateObject)};
-    if (name.symbol && IsCoarray(*name.symbol)) {
-      context_.Say(name.source,
-          "%s coarray not allowed in DO CONCURRENT"_err_en_US,
-          EnumToString(stmtType));
-    }
+  // Return the (possibly null) name of the statement
+  template<typename A> static const parser::Name *MaybeGetStmtName(const A &a) {
+    return common::GetPtrFromOptional(std::get<0>(a.t));
   }
 
-  void CheckDoesntContainCoarray(const parser::AllocateStmt &allocateStmt) {
-    const auto &allocationList{
-        std::get<std::list<parser::Allocation>>(allocateStmt.t)};
-    for (const auto &allocation : allocationList) {
-      const auto &allocateObject{
-          std::get<parser::AllocateObject>(allocation.t)};
-      CheckAllocateObjectIsntCoarray(allocateObject, StmtType::ALLOCATE);
-    }
-  }
-
-  void CheckDoesntContainCoarray(const parser::DeallocateStmt &deallocateStmt) {
-    const auto &allocateObjectList{
-        std::get<std::list<parser::AllocateObject>>(deallocateStmt.t)};
-    for (const auto &allocateObject : allocateObjectList) {
-      CheckAllocateObjectIsntCoarray(allocateObject, StmtType::DEALLOCATE);
-    }
-  }
-
-  bool anyObjectIsCoarray() { return false; }  // FIXME placeholder
   bool anyObjectIsPolymorphic() { return false; }  // FIXME placeholder
-  bool EndTDeallocatesCoarray() { return false; }  // FIXME placeholder
   bool fromScope(const Symbol &symbol, const std::string &moduleName) {
     if (symbol.GetUltimate().owner().IsModule() &&
         symbol.GetUltimate().owner().GetName().value().ToString() ==
@@ -318,8 +253,10 @@ public:
 
   void checkLabelUse(const parser::Label &labelUsed) {
     if (labels_.find(labelUsed) == labels_.end()) {
-      context_.Say(currentStatementSourcePosition_,
-          "control flow escapes from DO CONCURRENT"_err_en_US);
+      context_
+          .Say(currentStatementSourcePosition_,
+              "Control flow escapes from DO CONCURRENT"_err_en_US)
+          .Attach(context_.location().value(), "Enclosing statement"_en_US);
     }
   }
 
@@ -349,11 +286,14 @@ public:
       if (IsVariableName(*symbol)) {
         const Scope &variableScope{symbol->owner()};
         if (DoesScopeContain(&variableScope, blockScope_)) {
-          context_.Say(name.source,
-              "Variable '%s' from an enclosing scope referenced in a DO "
-              "CONCURRENT with DEFAULT(NONE) must appear in a "
-              "locality-spec"_err_en_US,
-              name.source);
+          context_
+              .Say(name.source,
+                  "Variable '%s' from an enclosing scope referenced in a DO "
+                  "CONCURRENT with DEFAULT(NONE) must appear in a "
+                  "locality-spec"_err_en_US,
+                  name.source)
+              .Attach(symbol->name(), "Declaration of variable '%s'"_en_US,
+                  symbol->name());
         }
       }
     }
@@ -454,6 +394,7 @@ private:
     auto &doStmt{
         std::get<parser::Statement<parser::NonLabelDoStmt>>(doConstruct.t)};
     currentStatementSourcePosition_ = doStmt.source;
+    context_.set_location(currentStatementSourcePosition_);
 
     const parser::Block &block{std::get<parser::Block>(doConstruct.t)};
     DoConcurrentBodyEnforce doConcurrentBodyEnforce{context_};
@@ -519,7 +460,7 @@ private:
         const parser::CharBlock &name{ref->name()};
         context_
             .Say(currentStatementSourcePosition_,
-                "concurrent-header mask expression cannot reference an impure"
+                "Concurrent-header mask expression cannot reference an impure"
                 " procedure"_err_en_US)
             .Attach(name, "Declaration of impure procedure '%s'"_en_US, name);
         return;
@@ -558,7 +499,8 @@ private:
         mask.thing.thing.value().source);
   }
 
-  // C1129, names in local locality-specs can't be in limit or step expressions
+  // C1129, names in local locality-specs can't be in limit or step
+  // expressions
   void CheckExprDoesNotReferenceLocal(
       const parser::ScalarIntExpr &expr, const SymbolSet &localVars) const {
     CheckNoCollisions(GatherSymbolsFromExpression(expr.thing.thing.value()),
@@ -568,8 +510,8 @@ private:
         expr.thing.thing.value().source);
   }
 
-  // C1130, default(none) locality requires names to be in locality-specs to be
-  // used in the body of the DO loop
+  // C1130, default(none) locality requires names to be in locality-specs to
+  // be used in the body of the DO loop
   void CheckDefaultNoneImpliesExplicitLocality(
       const std::list<parser::LocalitySpec> &localitySpecs,
       const parser::Block &block) const {
@@ -579,7 +521,7 @@ private:
         if (hasDefaultNone) {
           // C1127, you can only have one DEFAULT(NONE)
           context_.Say(currentStatementSourcePosition_,
-              "only one DEFAULT(NONE) may appear"_en_US);
+              "Only one DEFAULT(NONE) may appear"_en_US);
           break;
         }
         hasDefaultNone = true;
@@ -748,10 +690,10 @@ void DoChecker::CheckDoConcurrentExit(
   }
 }
 
-// Check nesting violations for a CYCLE or EXIT statement.  Loop up the nesting
-// levels looking for a construct that matches the CYCLE or EXIT statment.  At
-// every construct, check for a violation.  If we find a match without finding
-// a violation, the check is complete.
+// Check nesting violations for a CYCLE or EXIT statement.  Loop up the
+// nesting levels looking for a construct that matches the CYCLE or EXIT
+// statment.  At every construct, check for a violation.  If we find a match
+// without finding a violation, the check is complete.
 void DoChecker::CheckNesting(
     StmtType stmtType, const parser::Name *stmtName) const {
   const ConstructStack &stack{context_.constructStack()};

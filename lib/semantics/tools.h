@@ -113,10 +113,49 @@ inline bool IsAssumedSizeArray(const Symbol &symbol) {
 }
 bool IsAssumedLengthCharacter(const Symbol &);
 bool IsAssumedLengthCharacterFunction(const Symbol &);
+// Is the symbol modifiable in this scope
 std::optional<parser::MessageFixedText> WhyNotModifiable(
     const Symbol &symbol, const Scope &scope);
-// Is the symbol modifiable in this scope
 bool IsExternalInPureContext(const Symbol &symbol, const Scope &scope);
+bool HasCoarray(const parser::Expr &expression);
+template<typename T>
+
+// Detection of image control statements.  If the parameter is not an image
+// control statement, you get nullopt.  Otherwise, you get a message that
+// gives the specifics of why the construct is not allowed.
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(const T &) {
+  return std::nullopt;
+}
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::SyncAllStmt &);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::SyncImagesStmt &);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::SyncMemoryStmt &);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::SyncTeamStmt &);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::AllocateStmt &allocateStmt);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::DeallocateStmt &deallocateStmt);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::ChangeTeamStmt &);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::CriticalStmt &);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::EventPostStmt &);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::EventWaitStmt &);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::FormTeamStmt &);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::LockStmt &);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::UnlockStmt &);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::Call &call);
+std::optional<parser::MessageFixedText> GetImageControlStmtMsg(
+    const parser::StopStmt &);
 
 // Returns the complete list of derived type parameter symbols in
 // the order in which their declarations appear in the derived type
